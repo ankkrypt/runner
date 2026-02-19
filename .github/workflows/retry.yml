@@ -1,8 +1,8 @@
 name: 24-7 Mumbai VM Grabber
 on:
   schedule:
-    - cron: '0 */5 * * *' # Restarts the loop every 5 hours to stay fresh
-  workflow_dispatch:      # Allows you to start it manually
+    - cron: '0 */5 * * *' # Restarts every 5 hours
+  workflow_dispatch:      # Manual trigger
 
 jobs:
   loop-request:
@@ -10,7 +10,8 @@ jobs:
     steps:
       - name: Install OCI CLI
         run: |
-          curl -L -O https://raw.githubusercontent.com
+          # Fixed URL for the OCI CLI installer
+          curl -L https://raw.githubusercontent.com -o install.sh
           chmod +x install.sh
           ./install.sh --accept-all-defaults
           echo "/home/runner/bin" >> $GITHUB_PATH
@@ -24,8 +25,9 @@ jobs:
           echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
           echo "region=ap-mumbai-1" >> ~/.oci/config
           echo "key_file=~/.oci/key.pem" >> ~/.oci/config
-          echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/config_key.pem
-          tr -d '\r' < ~/.oci/config_key.pem > ~/.oci/key.pem
+          
+          # Writing the private key secret to a file
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/key.pem
           chmod 600 ~/.oci/key.pem
 
       - name: Infinite Loop (30s interval)
@@ -35,16 +37,18 @@ jobs:
           while [ $SECONDS -lt $end ]; do
             echo "Attempting to launch at $(date)"
             
-            # This triggers your Stack Apply Job
+            # This triggers your Stack Apply Job and stores the result
             RESULT=$(oci resource-manager job create-apply-job \
               --stack-id ${{ secrets.OCI_STACK_OCID }} \
               --execution-plan-strategy AUTO_APPROVED 2>&1)
             
-            if [[ "$RESULT" == *"SUCCEEDED"* ]]; then
-              echo "SUCCESS! VM Created."
-              exit 0
+            echo "$RESULT"
+            
+            # Check if the job was successfully created (not necessarily the VM yet)
+            if [[ "$RESULT" == *"lifecycle-state": "ACCEPTED"* ]] || [[ "$RESULT" == *"lifecycle-state": "IN_PROGRESS"* ]]; then
+              echo "Job submitted successfully! Checking again in 30 seconds..."
             fi
             
-            echo "Mumbai still full. Waiting 30 seconds..."
+            # If the log shows host capacity error, we keep looping
             sleep 30
           done
