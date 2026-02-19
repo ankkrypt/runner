@@ -1,0 +1,50 @@
+name: 24-7 Mumbai VM Grabber
+on:
+  schedule:
+    - cron: '0 */5 * * *' # Restarts the loop every 5 hours to stay fresh
+  workflow_dispatch:      # Allows you to start it manually
+
+jobs:
+  loop-request:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install OCI CLI
+        run: |
+          curl -L -O https://raw.githubusercontent.com
+          chmod +x install.sh
+          ./install.sh --accept-all-defaults
+          echo "/home/runner/bin" >> $GITHUB_PATH
+
+      - name: Configure OCI CLI
+        run: |
+          mkdir -p ~/.oci
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
+          echo "fingerprint=${{ secrets.OCI_FINGERPRINT }}" >> ~/.oci/config
+          echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
+          echo "region=ap-mumbai-1" >> ~/.oci/config
+          echo "key_file=~/.oci/key.pem" >> ~/.oci/config
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/config_key.pem
+          tr -d '\r' < ~/.oci/config_key.pem > ~/.oci/key.pem
+          chmod 600 ~/.oci/key.pem
+
+      - name: Infinite Loop (30s interval)
+        run: |
+          # This loop runs for 5 hours (18000 seconds)
+          end=$((SECONDS+18000))
+          while [ $SECONDS -lt $end ]; do
+            echo "Attempting to launch at $(date)"
+            
+            # This triggers your Stack Apply Job
+            RESULT=$(oci resource-manager job create-apply-job \
+              --stack-id ${{ secrets.OCI_STACK_OCID }} \
+              --execution-plan-strategy AUTO_APPROVED 2>&1)
+            
+            if [[ "$RESULT" == *"SUCCEEDED"* ]]; then
+              echo "SUCCESS! VM Created."
+              exit 0
+            fi
+            
+            echo "Mumbai still full. Waiting 30 seconds..."
+            sleep 30
+          done
