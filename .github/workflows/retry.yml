@@ -1,13 +1,12 @@
 name: 24-7 Mumbai VM Grabber
 on:
   schedule:
-    - cron: '*/30 * * * *' # Tries to start a new job every 30 minutes
-  workflow_dispatch:      # Allows you to start it manually
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   loop-request:
     runs-on: ubuntu-latest
-    # This ensures only one script runs at a time
     concurrency: 
       group: oci-grabber
       cancel-in-progress: true
@@ -27,27 +26,30 @@ jobs:
           echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
           echo "region=ap-mumbai-1" >> ~/.oci/config
           echo "key_file=~/.oci/key.pem" >> ~/.oci/config
-          
-          # Write the private key from secrets to the key file
           echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/key.pem
           chmod 600 ~/.oci/key.pem
-          
-          # Suppress the permission warnings in logs
           echo "OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True" >> $GITHUB_ENV
 
-      - name: Persistent Loop (25 minutes)
+      - name: Direct Launch Loop (60s interval)
         run: |
-          # This runs for 25 minutes (1500 seconds)
           end=$((SECONDS+1500))
           while [ $SECONDS -lt $end ]; do
-            echo "Attempting to launch at $(date)"
+            echo "Attempting direct launch at $(date)"
             
-            # Trigger the Stack Apply Job
-            # The '|| true' keeps the script running even if Oracle returns an error
-            oci resource-manager job create-apply-job \
+            # Using the Stack to trigger an Apply (but we keep the loop quiet)
+            # We add a longer sleep ONLY if we hit the 429 error
+            RESULT=$(oci resource-manager job create-apply-job \
               --stack-id ${{ secrets.OCI_STACK_OCID }} \
-              --execution-plan-strategy AUTO_APPROVED || true
+              --execution-plan-strategy AUTO_APPROVED 2>&1)
             
-            echo "Waiting 2 minutes (120s) to avoid API rate limits..."
-            sleep 120
+            if [[ "$RESULT" == *"TooManyRequests"* ]]; then
+              echo "Hit Rate Limit. Sleeping for 5 minutes..."
+              sleep 300
+            elif [[ "$RESULT" == *"Out of host capacity"* ]] || [[ "$RESULT" == *"ACCEPTED"* ]]; then
+              echo "Job submitted! Waiting 60 seconds for next attempt..."
+              sleep 60
+            else
+              echo "Response: $RESULT"
+              sleep 60
+            fi
           done
