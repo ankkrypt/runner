@@ -2,19 +2,16 @@ name: 24-7 Mumbai VM Grabber
 on:
   schedule:
     - cron: '0 */5 * * *' # Restarts every 5 hours
-  workflow_dispatch:      # Manual trigger
+  workflow_dispatch:
 
 jobs:
   loop-request:
     runs-on: ubuntu-latest
     steps:
-      - name: Install OCI CLI
+      - name: Install OCI CLI (via Pip)
         run: |
-          # Fixed URL for the OCI CLI installer
-          curl -L https://raw.githubusercontent.com -o install.sh
-          chmod +x install.sh
-          ./install.sh --accept-all-defaults
-          echo "/home/runner/bin" >> $GITHUB_PATH
+          pip install oci-cli
+          echo "/home/runner/.local/bin" >> $GITHUB_PATH
 
       - name: Configure OCI CLI
         run: |
@@ -32,23 +29,23 @@ jobs:
 
       - name: Infinite Loop (30s interval)
         run: |
-          # This loop runs for 5 hours (18000 seconds)
+          # This loop runs for about 5 hours
           end=$((SECONDS+18000))
           while [ $SECONDS -lt $end ]; do
             echo "Attempting to launch at $(date)"
             
-            # This triggers your Stack Apply Job and stores the result
+            # Using the OCI CLI to trigger your Stack
             RESULT=$(oci resource-manager job create-apply-job \
               --stack-id ${{ secrets.OCI_STACK_OCID }} \
               --execution-plan-strategy AUTO_APPROVED 2>&1)
             
             echo "$RESULT"
             
-            # Check if the job was successfully created (not necessarily the VM yet)
-            if [[ "$RESULT" == *"lifecycle-state": "ACCEPTED"* ]] || [[ "$RESULT" == *"lifecycle-state": "IN_PROGRESS"* ]]; then
-              echo "Job submitted successfully! Checking again in 30 seconds..."
+            # If the job is accepted, it's working!
+            if [[ "$RESULT" == *"lifecycle-state\": \"ACCEPTED"* ]] || [[ "$RESULT" == *"lifecycle-state\": \"IN_PROGRESS"* ]]; then
+              echo "Job submitted! Checking for capacity again in 30 seconds..."
             fi
             
-            # If the log shows host capacity error, we keep looping
+            # Sleep 30s before trying again
             sleep 30
           done
