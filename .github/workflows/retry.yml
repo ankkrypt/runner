@@ -34,19 +34,21 @@ jobs:
         run: |
           end=$((SECONDS+1500))
           while [ $SECONDS -lt $end ]; do
-            echo "Attempting direct launch at $(date)"
+            echo "Attempting launch at $(date)"
             
-            # Using the Stack to trigger an Apply (but we keep the loop quiet)
-            # We add a longer sleep ONLY if we hit the 429 error
+            # The '|| true' at the end prevents the script from crashing on errors
             RESULT=$(oci resource-manager job create-apply-job \
               --stack-id ${{ secrets.OCI_STACK_OCID }} \
-              --execution-plan-strategy AUTO_APPROVED 2>&1)
+              --execution-plan-strategy AUTO_APPROVED 2>&1 || true)
             
             if [[ "$RESULT" == *"TooManyRequests"* ]]; then
-              echo "Hit Rate Limit. Sleeping for 5 minutes..."
+              echo "Status: 429. Hit Rate Limit. Sleeping for 5 minutes..."
               sleep 300
-            elif [[ "$RESULT" == *"Out of host capacity"* ]] || [[ "$RESULT" == *"ACCEPTED"* ]]; then
-              echo "Job submitted! Waiting 60 seconds for next attempt..."
+            elif [[ "$RESULT" == *"Out of host capacity"* ]]; then
+              echo "Status: 500. Out of Capacity. Retrying in 60s..."
+              sleep 60
+            elif [[ "$RESULT" == *"ACCEPTED"* ]]; then
+              echo "Status: 200. Job submitted successfully! Waiting 60s..."
               sleep 60
             else
               echo "Response: $RESULT"
