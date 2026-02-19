@@ -2,15 +2,16 @@ name: 24-7 Mumbai VM Grabber
 on:
   schedule:
     - cron: '*/30 * * * *' # Tries to start a new job every 30 minutes
-  workflow_dispatch:
+  workflow_dispatch:      # Allows you to start it manually
 
 jobs:
   loop-request:
     runs-on: ubuntu-latest
-    # This prevents multiple versions from running at the same time
+    # This ensures only one script runs at a time
     concurrency: 
       group: oci-grabber
       cancel-in-progress: true
+      
     steps:
       - name: Install OCI CLI
         run: |
@@ -26,21 +27,27 @@ jobs:
           echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
           echo "region=ap-mumbai-1" >> ~/.oci/config
           echo "key_file=~/.oci/key.pem" >> ~/.oci/config
+          
+          # Write the private key from secrets to the key file
           echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/key.pem
           chmod 600 ~/.oci/key.pem
+          
+          # Suppress the permission warnings in logs
+          echo "OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True" >> $GITHUB_ENV
 
       - name: Persistent Loop (25 minutes)
         run: |
-          # This runs for 25 minutes, then exits cleanly so the next 'cron' can take over
+          # This runs for 25 minutes (1500 seconds)
           end=$((SECONDS+1500))
           while [ $SECONDS -lt $end ]; do
             echo "Attempting to launch at $(date)"
             
-            # The '|| true' ensures that even if Oracle gives an error, the script doesn't stop
+            # Trigger the Stack Apply Job
+            # The '|| true' keeps the script running even if Oracle returns an error
             oci resource-manager job create-apply-job \
               --stack-id ${{ secrets.OCI_STACK_OCID }} \
               --execution-plan-strategy AUTO_APPROVED || true
             
-            echo "Waiting 30 seconds..."
-            sleep 30
+            echo "Waiting 2 minutes (120s) to avoid API rate limits..."
+            sleep 120
           done
